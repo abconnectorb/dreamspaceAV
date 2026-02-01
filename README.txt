@@ -2,7 +2,7 @@ Dreamspace Audio Visulizer V1.0
 abconnectorb
 2026
 
-This is a audio visualizer that aims to capture the asthetics of the dream background visuals of Pokemon Mystery Dungeon Explorers of Sky
+This is a audio visualizer that aims to capture the aesthetics of the dream background visuals of Pokémon Mystery Dungeon Explorers of Sky
  
 Instructions:
 
