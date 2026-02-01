@@ -6,7 +6,7 @@ This is a audio visualizer that aims to capture the aesthetics of the dream back
  
 Instructions:
 
-1. Add your mp3 music file to the Dreamspace Audio Visualzer
+1. Add your mp3 music file to the Dreamspace Audio Visualzer folder
 
 2. Change the file name in main.py to your music file
 
