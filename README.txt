@@ -1,4 +1,4 @@
-Dreamspace Audio Visulizer V1.0
+Dreamspace Audio Visulizer V1.1
 abconnectorb
 2026
 
