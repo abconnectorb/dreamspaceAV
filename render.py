@@ -1,13 +1,12 @@
 import cv2
 import numpy as np
-from scipy.interpolate import interp1d
 
 WIDTH, HEIGHT = 1280, 720
 FPS = 60
 
 #CONFIG ZONE
 #SPEED OF 1 is 123 (at verticle scale of 0.5) BPM! or close to it
-bpm = 78
+bpm = 90
 
 colorSpeed = 0.5
 
@@ -15,7 +14,7 @@ colorSpeed = 0.5
 loudnessInfluence = 0.8
 
 #vertical scale allows more waves on screen at once. Ingame version is about 0.8
-verticalScale = 0.6
+verticalScale = 0.3
 #TS TAKES FOREVER (5 min per 1 min of Video at 60fps on my PC)
 #END CONFIG ZONE
 
@@ -51,10 +50,23 @@ midAmplitude = int((HEIGHT // 14) * verticalScale)
 
 frame_count = 0
 x = np.arange(WIDTH)
+x_phase = x / WIDTH * frequency
+band_positions = np.linspace(0, WIDTH - 1, NUM_BANDS)
+cols = np.arange(WIDTH)
 
 # --- Thickness setting ---
 THICKNESS = int(275 * verticalScale)
 MIDTHICKNESS = int(200 * verticalScale)
+
+layers = [(1.0, 1), (0.7, 2), (0.4, 3), (0.2, 4)]
+outer_thicknesses = [int(THICKNESS * mult) for mult, _ in layers]
+inner_thicknesses = [int(MIDTHICKNESS * mult) for mult, _ in layers]
+layer_brightnesses = [brightMod * brightness for _, brightness in layers]
+
+frame = np.empty((HEIGHT, WIDTH, 3), dtype=np.uint8)
+wave_diff = np.empty((HEIGHT + 1, WIDTH), dtype=np.int16)
+wave_layer_i16 = np.empty((HEIGHT, WIDTH), dtype=np.int16)
+wave_layer = np.empty((HEIGHT, WIDTH), dtype=np.uint8)
 
 # --- AMPLITUDE MULTIPLIER SETTINGS ---
 AMPLITUDE_SCALE = 2.0  # How much the audio affects amplitude (1.0 = no effect, 2.0 = doubles range)
@@ -88,10 +100,6 @@ while True:
     color_index = int((frame_count * colorSpeed) % NUM_COLORS)
     BACKGROUND = BACKGROUND_COLORS[color_index]
     
-    # Create background frame
-    frame = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
-    frame[:] = BACKGROUND
-
     t = frame_count / FPS
     
     # Get current frequency bands (loop if video is longer than audio)
@@ -100,54 +108,49 @@ while True:
     
     # Interpolate frequency bands across the WIDTH of the screen
     # Bass (low frequencies) on the left, treble (high frequencies) on the right
-    band_positions = np.linspace(0, WIDTH - 1, NUM_BANDS)
-    interpolator = interp1d(band_positions, current_bands, kind='linear', fill_value='extrapolate')
-    amplitude_multiplier = 1 + (AMPLITUDE_SCALE - 1) * interpolator(x)
+    amplitude_multiplier = 1 + (AMPLITUDE_SCALE - 1) * np.interp(x, band_positions, current_bands)
     
     # Clamp to reasonable values
     amplitude_multiplier = loudnessInfluence * np.clip(amplitude_multiplier, 0.5, 3.0)
 
     # Vectorized y center positions with audio-reactive amplitude multiplier
-    y_center = (HEIGHT // 2 + ((np.sin(2*(x / WIDTH * frequency - speed * t)) + 5) * amplitude * amplitude_multiplier * np.sin(
-        2 * np.pi * (x / WIDTH * frequency - speed * t)
+    outer_phase = x_phase - speed * t
+    y_center = (HEIGHT // 2 + ((np.sin(2 * outer_phase) + 5) * amplitude * amplitude_multiplier * np.sin(
+        2 * np.pi * outer_phase
     ))/5).astype(np.int32)
 
     # Create accumulator for wave brightness
-    wave_layer = np.zeros((HEIGHT, WIDTH), dtype=np.int16)
+    wave_diff.fill(0)
 
     # OUTER WAVE
-    layers = [(1.0, 1), (0.7, 2), (0.4, 3), (0.2, 4)]
-
-    for mult, brightness in layers:
-        thick = int(THICKNESS * mult)
-        
-        for i in range(WIDTH):
-            # Apply position-specific audio amplitude to thickness
-            adjusted_thick = int(thick * amplitude_multiplier[i])
-            y_start = max(0, (y_center[i] - adjusted_thick)) 
-            y_end = min(HEIGHT, (y_center[i] + adjusted_thick + 1)) 
-            wave_layer[y_start:y_end, i] += brightMod * brightness
+    for thick, layer_brightness in zip(outer_thicknesses, layer_brightnesses):
+        adjusted_thick = (thick * amplitude_multiplier).astype(np.int32)
+        y_start = np.maximum(0, y_center - adjusted_thick)
+        y_end = np.minimum(HEIGHT, y_center + adjusted_thick + 1)
+        wave_diff[y_start, cols] += layer_brightness
+        wave_diff[y_end, cols] -= layer_brightness
 
     # INNER WAVE
-    mid_y_center = (HEIGHT // 2 + ((np.sin(2*(x / WIDTH * frequency - midSpeed * t)) + 5) * midAmplitude * amplitude_multiplier * np.sin(
-        2 * np.pi * (x / WIDTH * frequency - midSpeed * t)
+    inner_phase = x_phase - midSpeed * t
+    mid_y_center = (HEIGHT // 2 + ((np.sin(2 * inner_phase) + 5) * midAmplitude * amplitude_multiplier * np.sin(
+        2 * np.pi * inner_phase
     ))/5).astype(np.int32)
 
-    mid_layers = [(1.0, 1), (0.7, 2), (0.4, 3), (0.2, 4)]
+    for thick, layer_brightness in zip(inner_thicknesses, layer_brightnesses):
+        adjusted_thick = (thick * amplitude_multiplier).astype(np.int32)
+        y_start = np.maximum(0, mid_y_center - adjusted_thick)
+        y_end = np.minimum(HEIGHT, mid_y_center + adjusted_thick + 1)
+        wave_diff[y_start, cols] += layer_brightness
+        wave_diff[y_end, cols] -= layer_brightness
 
-    for mult, brightness in mid_layers:
-        thick = int(MIDTHICKNESS * mult)
-        
-        for i in range(WIDTH):
-            # Apply position-specific audio amplitude to thickness
-            adjusted_thick = int(thick * amplitude_multiplier[i])
-            y_start = max(0, mid_y_center[i] - adjusted_thick)
-            y_end = min(HEIGHT, mid_y_center[i] + adjusted_thick + 1)
-            wave_layer[y_start:y_end, i] += brightMod * brightness
+    np.cumsum(wave_diff[:-1], axis=0, dtype=np.int16, out=wave_layer_i16)
 
     # Apply wave layer to frame
-    wave_layer = np.minimum(wave_layer, 255).astype(np.uint8)
-    frame[:, :] = np.minimum(frame.astype(np.int16) + wave_layer[:, :, np.newaxis], 255).astype(np.uint8)
+    np.minimum(wave_layer_i16, 255, out=wave_layer_i16)
+    np.copyto(wave_layer, wave_layer_i16, casting='unsafe')
+    frame[:, :, 0] = cv2.add(wave_layer, int(BACKGROUND[0]))
+    frame[:, :, 1] = cv2.add(wave_layer, int(BACKGROUND[1]))
+    frame[:, :, 2] = cv2.add(wave_layer, int(BACKGROUND[2]))
 
     # DS RESOLUTION EFFECT
     # Downscale to DS resolution

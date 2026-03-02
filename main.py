@@ -3,7 +3,7 @@ import librosa
 import matplotlib.pyplot as plt
 
 # Configuration #
-MP3_FILE = "A t.mp3"  # Change this to your MP3 file path
+MP3_FILE = "Farsighted.mp3"  # Change this to your MP3 file path
 #################
 
 OUTPUT_FILE = "frequency_bands.npy"  # Numpy file to save the data
